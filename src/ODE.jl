@@ -226,8 +226,10 @@ end
 #
 # supports keywords: points = :all | :specified (using dense output)
 #                    jacobian = G(t,y)::Function | nothing (FD)
+#                    mass = M::Matrix | nothing (I)
 function ode23s(F, y0, tspan; reltol = 1.0e-5, abstol = 1.0e-8,
                                                 jacobian=nothing,
+                                                mass=nothing,
                                                 points=:all,
                                                 norm=Base.norm,
                                                 minstep=abs(tspan[end] - tspan[1])/1e18,
@@ -242,7 +244,12 @@ function ode23s(F, y0, tspan; reltol = 1.0e-5, abstol = 1.0e-8,
         # fallback finite-difference
         jac = (t, y)->fdjacobian(F, y, t)
     end
-
+    if mass == nothing
+        M = I
+    else
+        M = mass
+    end
+    
     # constants
     const d = 1/(2 + sqrt(2))
     const e32 = 6 + sqrt(2)
@@ -278,14 +285,14 @@ function ode23s(F, y0, tspan; reltol = 1.0e-5, abstol = 1.0e-8,
         end
 
         if size(J,1) == 1
-            W = one(J) - h*d*J
+            W = M - h*d*J
         else
             # note: if there is a mass matrix M on the lhs of the ODE, i.e.,
             #   M * dy/dt = F(t,y)
             # we can simply replace eye(J) by M in the following expression
             # (see Sec. 5 in [SR97])
 
-            W = lufact( eye(J) - h*d*J )
+            W = lufact( M - h*d*J )
         end
 
         # approximate time-derivative of F
@@ -294,10 +301,10 @@ function ode23s(F, y0, tspan; reltol = 1.0e-5, abstol = 1.0e-8,
         # modified Rosenbrock formula
         k1 = W\(F0 + T)
         F1 = F(t + 0.5*h, y + 0.5*h*k1)
-        k2 = W\(F1 - k1) + k1
+        k2 = W\(F1 - M*k1) + k1
         ynew = y + h*k2
         F2 = F(t + h, ynew)
-        k3 = W\(F2 - e32*(k2 - F1) - 2*(k1 - F0) + T )
+        k3 = W\(F2 - e32*(M*k2 - F1) - 2*(M*k1 - F0) + T )
 
         err = (h/6)*norm(k1 - 2*k2 + k3) # error estimate
         delta = max(reltol*max(norm(y),norm(ynew)), abstol) # allowable error
